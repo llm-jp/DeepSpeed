@@ -231,6 +231,8 @@ class PipelineEngine(DeepSpeedEngine):
         # in the meantime, this fixes ZeRO2 + Pipelining enough to run a demo. Further profiling
         # needed to decide if it actually breaks everything.
         # (see https://github.com/EleutherAI/gpt-neox/issues/62#issuecomment-761471944)
+        if self.wall_clock_breakdown():
+            self.timers('(DP)reduce_tied_grads_').start()
         if self.zero_optimization_partition_gradients():
             self.optimizer.overlapping_partition_gradients_reduce_epilogue()
 
@@ -238,8 +240,12 @@ class PipelineEngine(DeepSpeedEngine):
         for weight, group in weight_group_list:
             grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
             dist.all_reduce(grad, group=group)
+        if self.wall_clock_breakdown():
+            self.timers('(DP)reduce_tied_grads_').stop()
 
     def _exec_reduce_grads(self):
+        if self.wall_clock_breakdown():
+            self.timers('(DP)reduce_grads_').start()
         self._force_grad_boundary = True
         if self.pipeline_enable_backward_allreduce:
             if self.bfloat16_enabled():
@@ -250,6 +256,8 @@ class PipelineEngine(DeepSpeedEngine):
             else:
                 self.allreduce_gradients(bucket_size=MEMORY_OPT_ALLREDUCE_SIZE)
         self._force_grad_boundary = False
+        if self.wall_clock_breakdown():
+            self.timers('(DP)reduce_grads_').stop()
 
     def _bf16_reduce_grads(self):
         # Make our own list of gradients from the optimizer's FP32 grads
@@ -356,6 +364,8 @@ class PipelineEngine(DeepSpeedEngine):
 
         if self.wall_clock_breakdown() and self.global_steps % self.steps_per_print() == 0:
             self.timers.log(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
+        if self.wall_clock_breakdown():
+            self.timers.out(['(DP)reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_'])
 
         # TODO: should return precisely what loss returned and allow others to be queried?
         return self.agg_train_loss
@@ -598,6 +608,8 @@ class PipelineEngine(DeepSpeedEngine):
         return batch
 
     def _exec_forward_pass(self, buffer_id):
+        if self.wall_clock_breakdown():
+            self.timers('forward_pass_').start()
         self.tput_timer.start()
         self.mem_status('BEFORE FWD', reset_max=True)
 
@@ -676,8 +688,12 @@ class PipelineEngine(DeepSpeedEngine):
                     self.total_loss = [torch.zeros_like(l) for l in self.loss]
                 for idx, l in enumerate(self.loss):
                     self.total_loss[idx] += l.detach()
+        if self.wall_clock_breakdown():
+            self.timers('forward_pass_').stop()
 
     def _exec_backward_pass(self, buffer_id):
+        if self.wall_clock_breakdown():
+            self.timers('backward_pass_').start()
         assert self.optimizer is not None, "must provide optimizer during " \
                                            "init in order to use backward"
 
@@ -750,9 +766,12 @@ class PipelineEngine(DeepSpeedEngine):
             self.timers('backward_microstep').stop()
 
         self.mem_status('AFTER BWD')
+        if self.wall_clock_breakdown():
+            self.timers('backward_pass_').stop()
 
     def _exec_load_micro_batch(self, buffer_id):
         if self.wall_clock_breakdown():
+            self.timers('load_micro_batch').start()
             self.timers('batch_input').start()
 
         batch = self._next_batch()
@@ -790,6 +809,7 @@ class PipelineEngine(DeepSpeedEngine):
             self.pipe_buffers['labels'][buffer_id] = loaded
 
         if self.wall_clock_breakdown():
+            self.timers('load_micro_batch').stop()
             self.timers('batch_input').stop()
 
     def _send_tensor_meta(self, buffer, recv_stage):
@@ -912,6 +932,7 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _exec_send_activations(self, buffer_id):
         if self.wall_clock_breakdown():
+            self.timers('(PP)send_activations_').start()
             self.timers('pipe_send_output').start()
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
@@ -944,10 +965,12 @@ class PipelineEngine(DeepSpeedEngine):
             outputs = tuple(outputs)
 
         if self.wall_clock_breakdown():
+            self.timers('(PP)send_activations_').stop()
             self.timers('pipe_send_output').stop()
 
     def _exec_send_grads(self, buffer_id):
         if self.wall_clock_breakdown():
+            self.timers('(PP)send_grads_').start()
             self.timers('pipe_send_grad').start()
 
         inputs = self.pipe_buffers['inputs'][buffer_id]
@@ -1000,10 +1023,12 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_buffers['inputs'][buffer_id] = None
 
         if self.wall_clock_breakdown():
+            self.timers('(PP)send_grads_').stop()
             self.timers('pipe_send_grad').stop()
 
     def _exec_recv_activations(self, buffer_id):
         if self.wall_clock_breakdown():
+            self.timers('(PP)recv_activations_').start()
             self.timers('pipe_recv_input').start()
 
         recvd = None
@@ -1043,10 +1068,12 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_buffers['inputs'][buffer_id] = recvd
 
         if self.wall_clock_breakdown():
+            self.timers('(PP)recv_activations_').stop()
             self.timers('pipe_recv_input').stop()
 
     def _exec_recv_grads(self, buffer_id):
         if self.wall_clock_breakdown():
+            self.timers('(PP)recv_grads_').start()
             self.timers('pipe_recv_grad').start()
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
@@ -1100,12 +1127,14 @@ class PipelineEngine(DeepSpeedEngine):
                 p2p.recv(buffer, self.next_stage)
 
         if self.wall_clock_breakdown():
+            self.timers('(PP)recv_grads_').stop()
             self.timers('pipe_recv_grad').stop()
 
     def _exec_optimizer_step(self, lr_kwargs=None):
         if self.wall_clock_breakdown():
             self.timers('step_microstep').start()
             self.timers('step').start()
+            self.timers('optimizer_').start()
         self.mem_status('BEFORE STEP', reset_max=True)
 
         self._force_grad_boundary = True
@@ -1124,6 +1153,7 @@ class PipelineEngine(DeepSpeedEngine):
         if self.wall_clock_breakdown():
             self.timers('step_microstep').stop()
             self.timers('step').stop()
+            self.timers('optimizer_').stop()
             if self.global_steps % self.steps_per_print() == 0:
                 self.timers.log([
                     'batch_input', 'forward_microstep', 'backward_microstep', 'backward_inner_microstep',

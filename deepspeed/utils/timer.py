@@ -148,6 +148,17 @@ class SynchronizedWallClockTimer:
                 elapsed_time = (self.timers[name].mean() * 1000.0 / normalizer)
                 means[name] = elapsed_time
         return means
+    def out(self, names, normalizer=1.0, reset=True):
+        """Log a group of timers."""
+        assert normalizer > 0.0
+        string = 'time (ms)'
+        for name in names:
+            elapsed_time = self.timers[name].elapsed(
+                reset=reset) / normalizer
+            string += ' | {}: {:.2f}'.format(name, elapsed_time)
+        rank = dist.get_rank()
+        with open(f'timer/timer.{rank:06d}', 'a') as f:
+            f.write(string + '\n')
 
 
 class ThroughputTimer:
