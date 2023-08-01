@@ -157,7 +157,7 @@ class SynchronizedWallClockTimer:
                 elapsed_time = self.timers[name].elapsed(reset=reset) / normalizer
                 string += ' | {}: {:.2f}'.format(name, elapsed_time)
         rank = dist.get_rank()
-        with open(f'timer/timer.{rank:06d}', 'a') as f:
+        with open(f'~/timer/timer.{rank:06d}', 'a') as f:
             f.write(string + '\n')
 
 
