@@ -704,6 +704,8 @@ class PipelineEngine(DeepSpeedEngine):
         if self.is_last_stage():
             super().backward(self.loss)
             self.mem_status('AFTER BWD')
+            if self.wall_clock_breakdown():
+                self.timers('backward_pass_').stop()
             return
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
