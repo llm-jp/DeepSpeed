@@ -692,8 +692,6 @@ class PipelineEngine(DeepSpeedEngine):
             self.timers('forward_pass_').stop()
 
     def _exec_backward_pass(self, buffer_id):
-        if self.wall_clock_breakdown():
-            self.timers('backward_pass_').start()
         assert self.optimizer is not None, "must provide optimizer during " \
                                            "init in order to use backward"
 
@@ -704,13 +702,12 @@ class PipelineEngine(DeepSpeedEngine):
         if self.is_last_stage():
             super().backward(self.loss)
             self.mem_status('AFTER BWD')
-            if self.wall_clock_breakdown():
-                self.timers('backward_pass_').stop()
             return
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
 
         if self.wall_clock_breakdown():
+            self.timers('backward_pass_').start()
             self.timers('backward_microstep').start()
             self.timers('backward').start()
             self.timers('backward_inner_microstep').start()
