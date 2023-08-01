@@ -157,7 +157,10 @@ class SynchronizedWallClockTimer:
                 elapsed_time = self.timers[name].elapsed(reset=reset) / normalizer
                 string += ' | {}: {:.2f}'.format(name, elapsed_time)
         rank = dist.get_rank()
-        with open(f'~/timer/timer.{rank:06d}', 'a') as f:
+        import os
+        pass_to_timer = os.environ.get('PASS_TO_TIMER','~/timer')
+        os.makedirs(pass_to_timer, exist_ok=True)
+        with open(f'{pass_to_timer}/timer.{rank:06d}', 'a') as f:
             f.write(string + '\n')
 
 
