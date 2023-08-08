@@ -196,7 +196,7 @@ class FP16_Optimizer(DeepSpeedOptimizer):
 
     def log_timers(self, name_list):
         if self.timers is not None:
-            self.timers.log(name_list)
+            self.timers.out(name_list)
 
     def set_lr(self, lr):
         """Set the learning rate."""

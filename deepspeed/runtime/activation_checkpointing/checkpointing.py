@@ -569,7 +569,7 @@ class CheckpointFunction(torch.autograd.Function):
 
         if PROFILE_TIME:
             timers('forward').stop()
-            timers.log(['forward'])
+            timers.out(['forward'])
         if SYNCHRONIZE:
             get_accelerator().synchronize()
 
@@ -692,7 +692,7 @@ class CheckpointFunction(torch.autograd.Function):
 
         if PROFILE_TIME:
             timers('backward').stop()
-            timers.log(['backward'])
+            timers.out(['backward'])
         if SYNCHRONIZE:
             get_accelerator().synchronize()
         ret_list = [None, None]  # first None for ctx

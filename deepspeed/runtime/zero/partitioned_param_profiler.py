@@ -49,7 +49,7 @@ class PartitionedParameterProfiler(object):
     def _log_timers(self):
         if self.timers is None:
             return
-        self.timers.log(names=list(self.event_counters.keys()))
+        self.timers.out(names=list(self.event_counters.keys()))
 
     def _log_event_counters(self):
         for event_ctr in self.event_counters.values():

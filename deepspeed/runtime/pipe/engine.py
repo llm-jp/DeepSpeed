@@ -363,7 +363,7 @@ class PipelineEngine(DeepSpeedEngine):
             self.monitor.write_events(self.summary_events)
 
         if self.wall_clock_breakdown() and self.global_steps % self.steps_per_print() == 0:
-            self.timers.log(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
+            self.timers.out(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
         if self.wall_clock_breakdown():
             self.timers.out(['(DP)reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_'])
 
@@ -1157,12 +1157,12 @@ class PipelineEngine(DeepSpeedEngine):
             self.timers('step').stop()
             self.timers('optimizer_').stop()
             if self.global_steps % self.steps_per_print() == 0:
-                self.timers.log([
+                self.timers.out([
                     'batch_input', 'forward_microstep', 'backward_microstep', 'backward_inner_microstep',
                     'backward_allreduce_microstep', 'backward_tied_allreduce_microstep', 'step_microstep'
                 ])
             if self.global_steps % self.steps_per_print() == 0:
-                self.timers.log(['forward', 'backward', 'backward_inner', 'backward_allreduce', 'step'])
+                self.timers.out(['forward', 'backward', 'backward_inner', 'backward_allreduce', 'step'])
 
     def _zero_grads(self, inputs):
         if isinstance(inputs, torch.Tensor):

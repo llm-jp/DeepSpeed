@@ -148,7 +148,7 @@ class SynchronizedWallClockTimer:
                 elapsed_time = (self.timers[name].mean() * 1000.0 / normalizer)
                 means[name] = elapsed_time
         return means
-    def out(self, names, normalizer=1.0, reset=True):
+    def out(self, names, normalizer=1.0, reset=True, memory_breakdown=False, ranks=None):
         """Log a group of timers."""
         assert normalizer > 0.0
         string = 'time (ms)'

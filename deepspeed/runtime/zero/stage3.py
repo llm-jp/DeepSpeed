@@ -1637,7 +1637,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         if self.timers is None:
             return
 
-        self.timers.log(names=list(timer_names))
+        self.timers.out(names=list(timer_names))
 
     def start_timers(self, timer_names):
         if self.timers is None:

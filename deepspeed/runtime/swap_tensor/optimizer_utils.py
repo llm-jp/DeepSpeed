@@ -463,7 +463,7 @@ class OptimizerSwapper(object):
 
     def _log_timers(self, name_list, force=False):
         if self.timers and (SWAPPER_DEBUG_MODE or force):
-            self.timers.log(name_list)
+            self.timers.out(name_list)
 
     def _io_aligned_numel(self, numel):
         remainder = numel % self.numel_alignment

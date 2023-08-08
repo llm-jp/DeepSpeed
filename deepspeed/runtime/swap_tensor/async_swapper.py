@@ -171,4 +171,4 @@ class AsyncTensorSwapper(object):
 
     def _log_timers(self, name_list, force=False):
         if self.timers and force:
-            self.timers.log(name_list)
+            self.timers.out(name_list)
