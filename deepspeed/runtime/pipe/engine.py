@@ -365,7 +365,7 @@ class PipelineEngine(DeepSpeedEngine):
         if self.wall_clock_breakdown() and self.global_steps % self.steps_per_print() == 0:
             self.timers.out(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
         if self.wall_clock_breakdown():
-            self.timers.out(['(DP)reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_'])
+            self.timers.out(['(DP)reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_', 'load_micro_batch_'])
 
         # TODO: should return precisely what loss returned and allow others to be queried?
         return self.agg_train_loss
@@ -773,7 +773,7 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _exec_load_micro_batch(self, buffer_id):
         if self.wall_clock_breakdown():
-            self.timers('load_micro_batch').start()
+            self.timers('load_micro_batch_').start()
             self.timers('batch_input').start()
 
         batch = self._next_batch()
@@ -811,7 +811,7 @@ class PipelineEngine(DeepSpeedEngine):
             self.pipe_buffers['labels'][buffer_id] = loaded
 
         if self.wall_clock_breakdown():
-            self.timers('load_micro_batch').stop()
+            self.timers('load_micro_batch_').stop()
             self.timers('batch_input').stop()
 
     def _send_tensor_meta(self, buffer, recv_stage):
