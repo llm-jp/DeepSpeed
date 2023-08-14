@@ -238,9 +238,9 @@ class PipelineEngine(DeepSpeedEngine):
         for weight, group in weight_group_list:
             grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
             if self.wall_clock_breakdown():
-                self.timers('barrier').start()
+                self.timers('(barrier)reduce_tied_grads_').start()
                 dist.barrier(group)
-                self.timers('barrier').stop()
+                self.timers('(barrier)reduce_tied_grads_').stop()
                 self.timers('reduce_tied_grads_').start()
             dist.all_reduce(grad, group=group)
             if self.wall_clock_breakdown():
@@ -257,9 +257,9 @@ class PipelineEngine(DeepSpeedEngine):
                         else:
                             from deepspeed.utils import groups
                             dp_group = groups._get_data_parallel_group()
-                        self.timers('barrier').start()
+                        self.timers('(barrier)reduce_grads_').start()
                         dist.barrier(dp_group)
-                        self.timers('barrier').stop()
+                        self.timers('(barrier)reduce_grads_').stop()
                         self.timers('(DP)reduce_grads_').start()
                     self._bf16_reduce_grads()
                     if self.wall_clock_breakdown():
@@ -349,6 +349,7 @@ class PipelineEngine(DeepSpeedEngine):
 
         # Do the work
         self.timers('train_batch').start()
+        self.timers('iteration_').start()
         sched = schedule.TrainSchedule(micro_batches=self.micro_batches,
                                        stages=self.num_stages,
                                        stage_id=self.stage_id)
@@ -356,6 +357,7 @@ class PipelineEngine(DeepSpeedEngine):
         self.agg_train_loss = self._aggregate_total_loss()
 
         self.timers('train_batch').stop()
+        self.timers('iteration_').stop()
 
         if self.global_steps % self.steps_per_print() == 0:
             if self.global_rank == 0:
@@ -376,7 +378,7 @@ class PipelineEngine(DeepSpeedEngine):
         if self.wall_clock_breakdown() and self.global_steps % self.steps_per_print() == 0:
             self.timers.out(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
         if self.wall_clock_breakdown():
-            self.timers.out(['reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_', 'load_micro_batch_', 'barrier'])
+            self.timers.out(['reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_', 'load_micro_batch_', '(barrier)reduce_tied_grads_', '(barrier)reduce_grads_', '(barrier)send_activations_', '(barrier)send_grads_', '(barrier)recv_activations_', '(barrier)recv_grads_', 'iteration_'])
 
         # TODO: should return precisely what loss returned and allow others to be queried?
         return self.agg_train_loss
@@ -963,9 +965,9 @@ class PipelineEngine(DeepSpeedEngine):
 
         if self.wall_clock_breakdown():
             from .p2p import _get_send_recv_group, _grid
-            self.timers('barrier').start()
+            self.timers('(barrier)send_activations_').start()
             dist.barrier(_get_send_recv_group(_grid.get_stage_id(), self.next_stage))
-            self.timers('barrier').stop()
+            self.timers('(barrier)send_activations_').stop()
             self.timers('(PP)send_activations_').start()
         if isinstance(outputs, torch.Tensor):
             p2p.send(outputs, self.next_stage)
@@ -1021,9 +1023,9 @@ class PipelineEngine(DeepSpeedEngine):
 
         if self.wall_clock_breakdown():
             from .p2p import _get_send_recv_group, _grid
-            self.timers('barrier').start()
+            self.timers('(barrier)send_grads_').start()
             dist.barrier(_get_send_recv_group(_grid.get_stage_id(), self.next_stage))
-            self.timers('barrier').stop()
+            self.timers('(barrier)send_grads_').stop()
             self.timers('(PP)send_grads_').start()
         if isinstance(inputs, torch.Tensor):
             assert inputs.grad is not None
@@ -1063,9 +1065,9 @@ class PipelineEngine(DeepSpeedEngine):
 
         if self.wall_clock_breakdown():
             from .p2p import _get_send_recv_group, _grid
-            self.timers('barrier').start()
+            self.timers('(barrier)recv_activations_').start()
             dist.barrier(_get_send_recv_group(self.prev_stage, _grid.get_stage_id()))
-            self.timers('barrier').stop()
+            self.timers('(barrier)recv_activations_').stop()
             self.timers('(PP)recv_activations_').start()
         if isinstance(self.pipe_recv_buf, torch.Tensor):
             p2p.recv(self.pipe_recv_buf, self.prev_stage)
@@ -1148,9 +1150,9 @@ class PipelineEngine(DeepSpeedEngine):
 
         if self.wall_clock_breakdown():
             from .p2p import _get_send_recv_group, _grid
-            self.timers('barrier').start()
+            self.timers('(barrier)recv_grads_').start()
             dist.barrier(_get_send_recv_group(self.prev_stage, _grid.get_stage_id()))
-            self.timers('barrier').stop()
+            self.timers('(barrier)recv_grads_').stop()
             self.timers('(PP)recv_grads_').start()
         if isinstance(self.grad_layer, torch.Tensor):
             p2p.recv(self.grad_layer, self.next_stage)
