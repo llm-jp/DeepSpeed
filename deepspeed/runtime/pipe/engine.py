@@ -231,33 +231,44 @@ class PipelineEngine(DeepSpeedEngine):
         # in the meantime, this fixes ZeRO2 + Pipelining enough to run a demo. Further profiling
         # needed to decide if it actually breaks everything.
         # (see https://github.com/EleutherAI/gpt-neox/issues/62#issuecomment-761471944)
-        if self.wall_clock_breakdown():
-            self.timers('(DP)reduce_tied_grads_').start()
         if self.zero_optimization_partition_gradients():
             self.optimizer.overlapping_partition_gradients_reduce_epilogue()
 
         weight_group_list = self.module.get_tied_weights_and_groups()
         for weight, group in weight_group_list:
             grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
+            if self.wall_clock_breakdown():
+                self.timers('barrier').start()
+                dist.barrier(group)
+                self.timers('barrier').stop()
+                self.timers('reduce_tied_grads_').start()
             dist.all_reduce(grad, group=group)
-        if self.wall_clock_breakdown():
-            self.timers('(DP)reduce_tied_grads_').stop()
+            if self.wall_clock_breakdown():
+                self.timers('reduce_tied_grads_').stop()
 
     def _exec_reduce_grads(self):
-        if self.wall_clock_breakdown():
-            self.timers('(DP)reduce_grads_').start()
         self._force_grad_boundary = True
         if self.pipeline_enable_backward_allreduce:
             if self.bfloat16_enabled():
                 if self.zero_optimization_stage() < ZeroStageEnum.gradients:
+                    if self.wall_clock_breakdown():
+                        if self.pipeline_parallelism:
+                            dp_group = self.mpu.get_data_parallel_group()
+                        else:
+                            from deepspeed.utils import groups
+                            dp_group = groups._get_data_parallel_group()
+                        self.timers('barrier').start()
+                        dist.barrier(dp_group)
+                        self.timers('barrier').stop()
+                        self.timers('(DP)reduce_grads_').start()
                     self._bf16_reduce_grads()
+                    if self.wall_clock_breakdown():
+                        self.timers('(DP)reduce_grads_').stop()
                 else:
                     raise NotImplementedError("PP+BF16 only work for ZeRO Stage 1")
             else:
                 self.allreduce_gradients(bucket_size=MEMORY_OPT_ALLREDUCE_SIZE)
         self._force_grad_boundary = False
-        if self.wall_clock_breakdown():
-            self.timers('(DP)reduce_grads_').stop()
 
     def _bf16_reduce_grads(self):
         # Make our own list of gradients from the optimizer's FP32 grads
@@ -365,7 +376,7 @@ class PipelineEngine(DeepSpeedEngine):
         if self.wall_clock_breakdown() and self.global_steps % self.steps_per_print() == 0:
             self.timers.out(['pipe_send_output', 'pipe_send_grad', 'pipe_recv_input', 'pipe_recv_grad'])
         if self.wall_clock_breakdown():
-            self.timers.out(['(DP)reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_', 'load_micro_batch_'])
+            self.timers.out(['reduce_tied_grads_', '(DP)reduce_grads_', 'forward_pass_', 'backward_pass_', '(PP)send_activations_', '(PP)send_grads_', '(PP)recv_activations_', '(PP)recv_grads_', 'optimizer_', 'load_micro_batch_', 'barrier'])
 
         # TODO: should return precisely what loss returned and allow others to be queried?
         return self.agg_train_loss
@@ -934,7 +945,6 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _exec_send_activations(self, buffer_id):
         if self.wall_clock_breakdown():
-            self.timers('(PP)send_activations_').start()
             self.timers('pipe_send_output').start()
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
@@ -951,6 +961,12 @@ class PipelineEngine(DeepSpeedEngine):
             self.first_output_send = False
             self._send_tensor_meta(outputs, self.next_stage)
 
+        if self.wall_clock_breakdown():
+            from .p2p import _get_send_recv_group, _grid
+            self.timers('barrier').start()
+            dist.barrier(_get_send_recv_group(_grid.get_stage_id(), self.next_stage))
+            self.timers('barrier').stop()
+            self.timers('(PP)send_activations_').start()
         if isinstance(outputs, torch.Tensor):
             p2p.send(outputs, self.next_stage)
         elif isinstance(outputs, tuple):
@@ -959,6 +975,8 @@ class PipelineEngine(DeepSpeedEngine):
         else:
             raise NotImplementedError('Could not send output of type '
                                       f'{type(outputs)}')
+        if self.wall_clock_breakdown():
+            self.timers('(PP)send_activations_').stop()
 
         # Restore the boolean tensor
         if self.has_attention_mask or self.has_bool_tensors:
@@ -967,12 +985,10 @@ class PipelineEngine(DeepSpeedEngine):
             outputs = tuple(outputs)
 
         if self.wall_clock_breakdown():
-            self.timers('(PP)send_activations_').stop()
             self.timers('pipe_send_output').stop()
 
     def _exec_send_grads(self, buffer_id):
         if self.wall_clock_breakdown():
-            self.timers('(PP)send_grads_').start()
             self.timers('pipe_send_grad').start()
 
         inputs = self.pipe_buffers['inputs'][buffer_id]
@@ -1003,6 +1019,12 @@ class PipelineEngine(DeepSpeedEngine):
             inputs.pop()
             inputs = tuple(inputs)
 
+        if self.wall_clock_breakdown():
+            from .p2p import _get_send_recv_group, _grid
+            self.timers('barrier').start()
+            dist.barrier(_get_send_recv_group(_grid.get_stage_id(), self.next_stage))
+            self.timers('barrier').stop()
+            self.timers('(PP)send_grads_').start()
         if isinstance(inputs, torch.Tensor):
             assert inputs.grad is not None
             p2p.send(inputs.grad, self.prev_stage)
@@ -1020,17 +1042,17 @@ class PipelineEngine(DeepSpeedEngine):
                         continue
                     assert buffer.grad is not None
                     p2p.send(buffer.grad, self.prev_stage)
+        if self.wall_clock_breakdown():
+            self.timers('(PP)send_grads_').stop()
 
         # We can free up the input buffer now
         self.pipe_buffers['inputs'][buffer_id] = None
 
         if self.wall_clock_breakdown():
-            self.timers('(PP)send_grads_').stop()
             self.timers('pipe_send_grad').stop()
 
     def _exec_recv_activations(self, buffer_id):
         if self.wall_clock_breakdown():
-            self.timers('(PP)recv_activations_').start()
             self.timers('pipe_recv_input').start()
 
         recvd = None
@@ -1039,6 +1061,12 @@ class PipelineEngine(DeepSpeedEngine):
         if self.pipe_recv_buf is None:
             self.pipe_recv_buf = self._recv_tensor_meta(self.prev_stage)
 
+        if self.wall_clock_breakdown():
+            from .p2p import _get_send_recv_group, _grid
+            self.timers('barrier').start()
+            dist.barrier(_get_send_recv_group(self.prev_stage, _grid.get_stage_id()))
+            self.timers('barrier').stop()
+            self.timers('(PP)recv_activations_').start()
         if isinstance(self.pipe_recv_buf, torch.Tensor):
             p2p.recv(self.pipe_recv_buf, self.prev_stage)
             recvd = self.pipe_recv_buf.clone().detach()
@@ -1066,16 +1094,16 @@ class PipelineEngine(DeepSpeedEngine):
 
             for buffer in recvd:
                 buffer.requires_grad = buffer.is_floating_point()
+        if self.wall_clock_breakdown():
+            self.timers('(PP)recv_activations_').stop()
 
         self.pipe_buffers['inputs'][buffer_id] = recvd
 
         if self.wall_clock_breakdown():
-            self.timers('(PP)recv_activations_').stop()
             self.timers('pipe_recv_input').stop()
 
     def _exec_recv_grads(self, buffer_id):
         if self.wall_clock_breakdown():
-            self.timers('(PP)recv_grads_').start()
             self.timers('pipe_recv_grad').start()
 
         outputs = self.pipe_buffers['outputs'][buffer_id]
@@ -1118,6 +1146,12 @@ class PipelineEngine(DeepSpeedEngine):
                     sizes_and_dtypes = [(list(t.size()), t.dtype) for t in outputs if t.is_floating_point()]
                 self.grad_layer = self._allocate_buffers(sizes_and_dtypes, num_buffers=1)[0]
 
+        if self.wall_clock_breakdown():
+            from .p2p import _get_send_recv_group, _grid
+            self.timers('barrier').start()
+            dist.barrier(_get_send_recv_group(self.prev_stage, _grid.get_stage_id()))
+            self.timers('barrier').stop()
+            self.timers('(PP)recv_grads_').start()
         if isinstance(self.grad_layer, torch.Tensor):
             p2p.recv(self.grad_layer, self.next_stage)
         else:
