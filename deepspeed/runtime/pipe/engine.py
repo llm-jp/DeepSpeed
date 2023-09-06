@@ -345,9 +345,10 @@ class PipelineEngine(DeepSpeedEngine):
                                        stages=self.num_stages,
                                        stage_id=self.stage_id)
         self._exec_schedule(sched)
-        self.agg_train_loss = self._aggregate_total_loss()
+        # self.agg_train_loss = self._aggregate_total_loss()
 
         self.timers(TRAIN_BATCH_TIMER).stop()
+        return 0
 
         if self.global_steps % self.steps_per_print() == 0:
             if self.global_rank == 0:
@@ -776,7 +777,7 @@ class PipelineEngine(DeepSpeedEngine):
         if self.is_first_stage():
             loaded = None
             if torch.is_tensor(batch[0]):
-                loaded = batch[0].clone().to(self.device).detach()
+                loaded = batch[0].clone().to('cpu').detach()
                 loaded.requires_grad = loaded.is_floating_point()
             else:
                 assert isinstance(batch[0], (tuple, list))
@@ -784,7 +785,7 @@ class PipelineEngine(DeepSpeedEngine):
                 loaded = []
                 for x in batch[0]:
                     assert torch.is_tensor(x)
-                    mine = x.clone().detach().to(self.device)
+                    mine = x.clone().detach().to('cpu')
                     mine.requires_grad = mine.is_floating_point()
                     loaded.append(mine)
                 loaded = tuple(loaded)
@@ -794,21 +795,26 @@ class PipelineEngine(DeepSpeedEngine):
         if self.is_last_stage():
             loaded = batch[1]
             if torch.is_tensor(batch[1]):
-                loaded = batch[1].to(self.device)
+                loaded = batch[1].to('cpu')
             elif isinstance(batch[1], tuple):
                 loaded = []
                 for x in batch[1]:
                     assert torch.is_tensor(x)
-                    x = x.to(self.device).detach()
+                    x = x.to('cpu').detach()
                     loaded.append(x)
                 loaded = tuple(loaded)
 
             self.pipe_buffers['labels'][buffer_id] = loaded
         
         import os
-        os.makedirs('used_data')
-        with open(f'used_data/{self.global_rank}_data.txt') as f:
-            f.write(f'{loaded}\n\n')
+        import json
+        import numpy as np
+        os.makedirs('used_data', exist_ok=True)
+        with open(f'used_data/{self.global_rank}_data.txt', 'a') as f:
+            np.savetxt(f,loaded[0],delimiter=',')
+            f.write('\n\n')
+            np.savetxt(f,loaded[1],delimiter=',')
+            f.write('\n\n')
 
         if self.wall_clock_breakdown():
             self.timers(BATCH_INPUT_TIMER).stop()
@@ -1307,20 +1313,23 @@ class PipelineEngine(DeepSpeedEngine):
         self.module.load_state_dir(load_dir=self._curr_ckpt_path,
                                    strict=strict,
                                    checkpoint_engine=self.checkpoint_engine)
+    
+    def _noop(self, **args):
+        pass
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
     _INSTRUCTION_MAP = {
-        # schedule.OptimizerStep: _exec_optimizer_step,
-        # schedule.ReduceGrads: _exec_reduce_grads,
-        # schedule.ReduceTiedGrads: _exec_reduce_tied_grads,
+        schedule.OptimizerStep: _noop,
+        schedule.ReduceGrads: _noop,
+        schedule.ReduceTiedGrads: _noop,
         schedule.LoadMicroBatch: _exec_load_micro_batch,
-        # schedule.ForwardPass: _exec_forward_pass,
-        # schedule.BackwardPass: _exec_backward_pass,
-        # schedule.SendActivation: _exec_send_activations,
-        # schedule.RecvActivation: _exec_recv_activations,
-        # schedule.SendGrad: _exec_send_grads,
-        # schedule.RecvGrad: _exec_recv_grads,
+        schedule.ForwardPass: _noop,
+        schedule.BackwardPass: _noop,
+        schedule.SendActivation: _noop,
+        schedule.RecvActivation: _noop,
+        schedule.SendGrad: _noop,
+        schedule.RecvGrad: _noop,
     }
 
     def _exec_schedule(self, pipe_schedule):
