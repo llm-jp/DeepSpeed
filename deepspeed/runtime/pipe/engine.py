@@ -804,6 +804,11 @@ class PipelineEngine(DeepSpeedEngine):
                 loaded = tuple(loaded)
 
             self.pipe_buffers['labels'][buffer_id] = loaded
+        
+        import os
+        os.makedirs('used_data')
+        with open(f'used_data/{self.global_rank}_data.txt') as f:
+            f.write(f'{loaded}\n\n')
 
         if self.wall_clock_breakdown():
             self.timers(BATCH_INPUT_TIMER).stop()
@@ -1306,16 +1311,16 @@ class PipelineEngine(DeepSpeedEngine):
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
     _INSTRUCTION_MAP = {
-        schedule.OptimizerStep: _exec_optimizer_step,
-        schedule.ReduceGrads: _exec_reduce_grads,
-        schedule.ReduceTiedGrads: _exec_reduce_tied_grads,
+        # schedule.OptimizerStep: _exec_optimizer_step,
+        # schedule.ReduceGrads: _exec_reduce_grads,
+        # schedule.ReduceTiedGrads: _exec_reduce_tied_grads,
         schedule.LoadMicroBatch: _exec_load_micro_batch,
-        schedule.ForwardPass: _exec_forward_pass,
-        schedule.BackwardPass: _exec_backward_pass,
-        schedule.SendActivation: _exec_send_activations,
-        schedule.RecvActivation: _exec_recv_activations,
-        schedule.SendGrad: _exec_send_grads,
-        schedule.RecvGrad: _exec_recv_grads,
+        # schedule.ForwardPass: _exec_forward_pass,
+        # schedule.BackwardPass: _exec_backward_pass,
+        # schedule.SendActivation: _exec_send_activations,
+        # schedule.RecvActivation: _exec_recv_activations,
+        # schedule.SendGrad: _exec_send_grads,
+        # schedule.RecvGrad: _exec_recv_grads,
     }
 
     def _exec_schedule(self, pipe_schedule):
