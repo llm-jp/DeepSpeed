@@ -811,9 +811,9 @@ class PipelineEngine(DeepSpeedEngine):
         import numpy as np
         os.makedirs('used_data', exist_ok=True)
         with open(f'used_data/{self.global_rank}_data.txt', 'a') as f:
-            np.savetxt(f,loaded[0],delimiter=',')
+            np.savetxt(f,loaded[0],fmt='%.0f',delimiter=',')
             f.write('\n\n')
-            np.savetxt(f,loaded[1],delimiter=',')
+            np.savetxt(f,loaded[1],fmt='%.0f',delimiter=',')
             f.write('\n\n')
 
         if self.wall_clock_breakdown():
