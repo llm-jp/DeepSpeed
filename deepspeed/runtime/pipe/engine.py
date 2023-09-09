@@ -813,8 +813,6 @@ class PipelineEngine(DeepSpeedEngine):
         with open(f'used_data/{self.global_rank}_data.txt', 'a') as f:
             np.savetxt(f,loaded[0],fmt='%.0f',delimiter=',')
             f.write('\n\n')
-            np.savetxt(f,loaded[1],fmt='%.0f',delimiter=',')
-            f.write('\n\n')
 
         if self.wall_clock_breakdown():
             self.timers(BATCH_INPUT_TIMER).stop()
